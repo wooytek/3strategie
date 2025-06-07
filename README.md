@@ -23,9 +23,9 @@ index_usdjpy.html
 eurusd_pnl_chart_only.html  
 usdjpy_pnl_chart_only.html  
 
-Strona główna: 
-https://3strategie.s3.eu-central-1.amazonaws.com/summary_dashboard.html
-Podstrona USDJPY:
-https://usdjpy-bucket.s3.eu-central-1.amazonaws.com/index.html
-Podstrona EURUSD:
-https://4unfwy7fpknpfqcajrl266tspq0lkqwb.lambda-url.eu-central-1.on.aws/
+Strona główna:   
+https://3strategie.s3.eu-central-1.amazonaws.com/summary_dashboard.html  
+Podstrona USDJPY:  
+https://usdjpy-bucket.s3.eu-central-1.amazonaws.com/index.html  
+Podstrona EURUSD:  
+https://4unfwy7fpknpfqcajrl266tspq0lkqwb.lambda-url.eu-central-1.on.aws/  
