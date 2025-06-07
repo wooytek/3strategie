@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Podsumowanie Strategii Forex</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+          "Segoe UI Symbol";
+        margin: 0;
+        padding: 20px;
+        background-color: #f4f4f8;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        color: #333;
+        line-height: 1.6;
+      }
+      .main-content-wrapper {
+        width: 90%;
+        max-width: 900px;
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        box-sizing: border-box;
+        margin-bottom: 30px;
+      }
+      h1 {
+        text-align: center;
+        color: #2c3e50;
+        margin-bottom: 25px;
+        font-size: 1.8em;
+      }
+      h2.section-title {
+        text-align: left;
+        color: #34495e;
+        margin-top: 30px;
+        margin-bottom: 15px;
+        border-bottom: 2px solid #ecf0f1;
+        padding-bottom: 10px;
+        font-size: 1.4em;
+      }
+      h3.chart-title {
+        text-align: center;
+        color: #333;
+        margin-top: 0px;
+        margin-bottom: 10px;
+        font-size: 1.2em;
+      }
+      .chart-item-container {
+        margin-bottom: 30px;
+        padding: 15px;
+        background-color: #fdfdfd;
+        border-radius: 8px;
+      }
+      .chart-box-summary {
+        width: 100%;
+        height: 450px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        overflow: hidden;
+        position: relative;
+      }
+      .chart-box-summary iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+      .link-to-dashboard {
+        text-align: center;
+        margin-top: 15px;
+      }
+      .link-to-dashboard a {
+        text-decoration: none;
+        color: #3498db;
+        font-weight: bold;
+        font-size: 1.1em;
+        padding: 8px 15px;
+        border-radius: 5px;
+        transition: background-color 0.3s ease, color 0.3s ease;
+      }
+      .link-to-dashboard a:hover {
+        text-decoration: none;
+        background-color: #3498db;
+        color: #fff;
+      }
+      .description-section {
+        margin-top: 30px;
+        padding: 20px;
+        background-color: #f9f9f9;
+        border-radius: 8px;
+        border: 1px solid #eee;
+      }
+      .description-section p {
+        color: #555;
+        margin-bottom: 1em;
+      }
+      .description-section strong {
+        color: #2c3e50;
+      }
+      footer {
+        text-align: center;
+        margin-top: auto;
+        padding: 20px;
+        color: #777;
+        font-size: 0.9em;
+      }
+      /* Style responsywne */
+      @media (max-width: 768px) {
+        .main-content-wrapper {
+          width: 95%;
+          padding: 15px;
+        }
+        h1 {
+          font-size: 1.5em;
+        }
+        h2.section-title {
+          font-size: 1.2em;
+        }
+        h3.chart-title {
+          font-size: 1em;
+        }
+        .chart-box-summary {
+          height: 0;
+          padding-bottom: 80%;
+        }
+        .chart-box-summary iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+        }
+        .description-section {
+          padding: 15px;
+        }
+      }
+      @media (max-width: 480px) {
+        .main-content-wrapper {
+          padding: 10px;
+        }
+        h1 {
+          font-size: 1.3em;
+        }
+        h2.section-title {
+          font-size: 1.1em;
+        }
+        h3.chart-title {
+          font-size: 0.9em;
+        }
+        .chart-box-summary {
+          padding-bottom: 90%;
+        }
+        .link-to-dashboard a {
+          font-size: 0.9em;
+          padding: 6px 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="main-content-wrapper">
+      <h1>Główne Podsumowanie Strategii Forex</h1>
+
+      <div class="chart-item-container">
+        <h3 class="chart-title">Wyniki PnL dla EUR/USD</h3>
+        <div class="chart-box-summary">
+          <iframe
+            src="https://3strategie.s3.eu-central-1.amazonaws.com/eurusd_pnl_chart_only.html"
+            title="Wykres PnL dla EUR/USD"
+          ></iframe>
+        </div>
+        <p class="link-to-dashboard">
+          <a
+            href="https://4unfwy7fpknpfqcajrl266tspq0lkqwb.lambda-url.eu-central-1.on.aws/"
+            >Zobacz Pełny Dashboard EUR/USD &raquo;</a
+          >
+        </p>
+      </div>
+
+      <div class="chart-item-container">
+        <h3 class="chart-title">Wyniki PnL dla USD/JPY</h3>
+        <div class="chart-box-summary">
+          <iframe
+            src="https://3strategie.s3.eu-central-1.amazonaws.com/usdjpy_pnl_chart_only.html"
+            title="Wykres PnL dla USD/JPY"
+          ></iframe>
+        </div>
+        <p class="link-to-dashboard">
+          <a
+            href="https://usdjpy-bucket.s3.eu-central-1.amazonaws.com/index.html"
+            >Zobacz Pełny Dashboard USD/JPY &raquo;</a
+          >
+        </p>
+      </div>
+
+      <div class="description-section"></div>
+    </div>
+    <footer>
+      <p>
+        &copy;
+        <script>
+          document.write(new Date().getFullYear());
+        </script>
+        Dashboard Analiz Strategii Forex. Wszelkie prawa zastrzeżone.
+      </p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <title>Dashboard USD/JPY</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.x/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f4f4f4;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        min-height: 100vh;
+      }
+      .main-content-wrapper {
+        width: 90%;
+        max-width: 1200px;
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        box-sizing: border-box;
+        position: relative;
+      }
+      h1 {
+        text-align: center;
+        color: #333;
+        margin-bottom: 30px;
+      }
+      h2 {
+        color: #333;
+        text-align: left;
+        margin-top: 30px;
+        margin-bottom: 15px;
+      }
+      .chart-box {
+        width: 100%;
+        height: 350px;
+        margin: 20px auto;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      canvas {
+        max-width: 100%;
+        height: 100%;
+      }
+      .tbl {
+        width: 100%;
+        margin: 20px auto;
+        text-align: left;
+      }
+      .tbl-inner {
+        max-height: 300px;
+        overflow-y: auto;
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+        box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.05);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0;
+        font-size: 0.9em;
+        min-width: 600px;
+      }
+      th,
+      td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #f0f0f0;
+        text-align: left;
+      }
+      th {
+        background-color: #e9ecef;
+        color: #495057;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+      tbody tr:nth-child(even) {
+        background-color: #f8f9fa;
+      }
+      tbody tr:hover {
+        background-color: #e2e6ea;
+      }
+      td:last-child {
+        text-align: left;
+        font-weight: bold;
+      }
+      td[data-pips^="+"] {
+        color: #28a745;
+      }
+      td[data-pips^="-"] {
+        color: #dc3545;
+      }
+      .home-link {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        text-decoration: none;
+        color: #555;
+        z-index: 1000;
+        transition: color 0.2s ease-in-out;
+        display: inline-block;
+        line-height: 0;
+      }
+      .home-link svg {
+        display: block;
+      }
+      .home-link:hover {
+        color: #007bff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="main-content-wrapper">
+      <a
+        href="https://3strategie.s3.eu-central-1.amazonaws.com/summary_dashboard.html"
+        class="home-link"
+        title="Strona główna podsumowania"
+        ><svg
+          xmlns="http://www.w3.org/2000/svg"
+          height="45px"
+          viewBox="0 0 24 24"
+          width="45px"
+          fill="currentColor"
+        >
+          <path d="M0 0h24v24H0V0z" fill="none" />
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" /></svg
+      ></a>
+      <h1>USD/JPY – Dashboard strategii</h1>
+      <div class="chart-box"><canvas id="rateChart"></canvas></div>
+      <div class="chart-box"><canvas id="pnlChart"></canvas></div>
+      <div class="tbl">
+        <h2>Strategia 1 – Klasyczna (Σ -60.0 pips)</h2>
+      </div>
+    </div>
+    <script>
+      /**
+       * Użyty plugin do Chart.js .
+       * dla spójnego wyglądu i wyrównania, gdy wykresy są umieszczone
+       * jeden pod drugim. Działa poprzez znalezienie maksymalnej wymaganej szerokości
+       * dla osi Y na wszystkich wykresach, a następnie ustawienie tej szerokości dla każdego z nich.
+       */
+      const yAxisSyncPlugin = {
+        id: "yAxisSync",
+        beforeLayout: (chart) => {
+          if (chart.canvas.id === "rateChart" && chartInstances.length === 0) {
+            maxGlobalYAxisWidth = 0;
+          }
+        },
+        afterFit: (chart) => {
+          if (chart.scales.y && chart.scales.y.id === "y") {
+            maxGlobalYAxisWidth = Math.max(
+              maxGlobalYAxisWidth,
+              chart.scales.y.width
+            );
+          }
+        },
+        afterDraw: (chart) => {
+          if (chart.scales.y && chart.scales.y.id === "y") {
+            if (chart.scales.y.width < maxGlobalYAxisWidth) {
+              chart.scales.y.width = maxGlobalYAxisWidth;
+              chart.update("none");
+            }
+          }
+        },
+        afterInit: (chart) => {
+          chartInstances.push(chart);
+          if (chartInstances.length === 2) {
+            chartInstances.forEach((inst) => {
+              if (inst.scales.y && inst.scales.y.id === "y") {
+                inst.scales.y.width = maxGlobalYAxisWidth;
+              }
+              inst.update("none");
+            });
+          }
+        },
+      };
+
+      let maxGlobalYAxisWidth = 0;
+      let chartInstances = [];
+      Chart.register(yAxisSyncPlugin);
+
+      // Inicjalizacja wykresu kursu USD/JPY
+      new Chart(document.getElementById("rateChart"), {
+        type: "line",
+        data: {
+          labels: [
+            "06:45",
+            "06:50",
+            "06:55",
+            "07:00",
+            "07:05",
+            "07:10",
+            "07:15",
+            "07:20",
+            "07:25",
+            "07:30",
+            "07:35",
+            "07:40",
+            "07:45",
+            "07:50",
+            "07:55",
+          ],
+          datasets: [
+            {
+              label: "USD/JPY",
+              data: [
+                143.814, 143.814, 143.803, 143.803, 143.85, 143.85, 143.878,
+                143.878, 143.915, 143.915, 143.932, 143.932, 143.941, 143.941,
+                143.926,
+              ],
+              borderColor: "#2563eb",
+              tension: 0.1,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: { label: (ctx) => "Cena: " + ctx.raw.toFixed(3) },
+            },
+          },
+          scales: {
+            y: {
+              id: "y",
+              ticks: {
+                callback: function (value) {
+                  return value.toFixed(3);
+                },
+              },
+            },
+            x: {},
+          },
+          layout: { padding: { right: 20 } },
+        },
+      });
+
+      // Inicjalizacja wykresu PnL dla strategii USD/JPY
+      new Chart(document.getElementById("pnlChart"), {
+        type: "line",
+        data: {
+          labels: [
+            "2025-05-25",
+            "2025-05-26",
+            "2025-05-27",
+            "2025-05-28",
+            "2025-05-29",
+            "2025-05-30",
+            "2025-05-31",
+            "2025-06-01",
+            "2025-06-02",
+            "2025-06-03",
+            "2025-06-04",
+            "2025-06-05",
+            "2025-06-06",
+            "2025-06-07",
+          ],
+          datasets: [
+            {
+              label: "Strategia 1 \u2013 Klasyczna",
+              data: [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, -40.0, -50.0, -10.0, -60.0, -60.0,
+              ],
+              borderColor: "rgba(255, 99, 132, 1)",
+              tension: 0.1,
+              fill: false,
+            },
+            {
+              label: "Strategia 2 \u2013 Anomalie",
+              data: [0, 0, 0, 0, 0, 0, 0, 0, 0, -15.0, -65.0, -5.0, 15.0, 15.0],
+              borderColor: "rgba(54, 162, 235, 1)",
+              tension: 0.1,
+              fill: false,
+            },
+            {
+              label: "Strategia 3 \u2013 Fraktal + SMA",
+              data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 36.0, 24.0, 72.0, 96.0, 96.0],
+              borderColor: "rgba(75, 192, 192, 1)",
+              tension: 0.1,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ctx.dataset.label + ": " + ctx.raw + " pips",
+              },
+            },
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              id: "y",
+              ticks: {
+                callback: function (value) {
+                  let formattedValue = value.toFixed(1);
+                  const desiredLength = 7;
+                  if (value > 0 && value < 100) {
+                    formattedValue = "   +" + formattedValue;
+                  }
+                  if (value >= 100) {
+                    formattedValue = " +" + formattedValue;
+                  }
+                  formattedValue = " " + formattedValue;
+                  return formattedValue.padStart(desiredLength);
+                },
+              },
+            },
+            x: {
+              type: "time",
+              time: {
+                unit: "day",
+                tooltipFormat: "dd-MM-yyyy",
+                displayFormats: { day: "dd-MM-yyyy" },
+              },
+              min: "2025-06-02T00:00:00",
+              max: "2025-06-07",
+            },
+          },
+          layout: { padding: { right: 20 } },
+        },
+      });
+    </script>
+  </body>
+</html>

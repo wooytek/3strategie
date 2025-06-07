@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wykres PnL EUR/USD</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.x/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: transparent;
+      }
+      canvas#pnlChartOnly {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="pnlChartOnly"></canvas>
+    <script>
+      /**
+       * Inicjalizuje wykres Chart.js na elemencie canvas.
+       * Dane do wykresu są osadzone bezpośrednio w tym skrypcie.
+       */
+      document.addEventListener("DOMContentLoaded", function () {
+        try {
+          const ctx = document.getElementById("pnlChartOnly").getContext("2d");
+          if (!ctx) {
+            console.error("Nie udało się pobrać kontekstu 2D dla canvas.");
+            return;
+          }
+
+          new Chart(ctx, {
+            type: "line",
+            data: {
+              labels: [
+                "2025-05-22",
+                "2025-05-23",
+                "2025-05-24",
+                "2025-05-25",
+                "2025-05-26",
+                "2025-05-27",
+                "2025-05-28",
+                "2025-05-29",
+                "2025-05-30",
+                "2025-05-31",
+                "2025-06-01",
+                "2025-06-02",
+                "2025-06-03",
+                "2025-06-04",
+                "2025-06-05",
+                "2025-06-06",
+              ],
+              datasets: [
+                {
+                  label: "Strategia 1 - PnL",
+                  data: [
+                    -10.0, 60.0, 60.0, 60.0, 50.0, 20.0, 70.0, 170.0, 120.0,
+                    120.0, 120.0, 150.0, 160.0, 120.0, 110.0, 70.0,
+                  ],
+                  borderColor: "rgba(255, 99, 132, 1)",
+                  tension: 0.1,
+                  fill: false,
+                },
+                {
+                  label: "Strategia 2 - PnL",
+                  data: [
+                    -30.0, 5.0, 5.0, 5.0, 0.0, 10.0, 25.0, 55.0, 10.0, 10.0,
+                    10.0, 10.0, 20.0, -10.0, -15.0, 5.0,
+                  ],
+                  borderColor: "rgba(54, 162, 235, 1)",
+                  tension: 0.1,
+                  fill: false,
+                },
+                {
+                  label: "Strategia 3 - PnL",
+                  data: [
+                    0.0, 48.0, 48.0, 48.0, 96.0, 60.0, 60.0, 36.0, -12.0, -12.0,
+                    -12.0, 12.0, 48.0, 12.0, 12.0, 0.0,
+                  ],
+                  borderColor: "rgba(75, 192, 192, 1)",
+                  tension: 0.1,
+                  fill: false,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) =>
+                      ctx.dataset.label + ": " + ctx.raw.toFixed(1) + " pips",
+                  },
+                },
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  ticks: {
+                    callback: function (value) {
+                      let formattedValue = value.toFixed(1);
+                      const desiredLength = 7;
+                      if (value > 0) {
+                        formattedValue = "+" + formattedValue;
+                      }
+                      formattedValue = " " + formattedValue;
+                      return formattedValue.padStart(desiredLength);
+                    },
+                  },
+                },
+                x: {
+                  type: "time",
+                  time: {
+                    unit: "day",
+                    tooltipFormat: "dd-MM-yyyy",
+                    displayFormats: { day: "dd-MM-yyyy" },
+                  },
+                  min: "2025-05-22",
+                  max: "2025-06-06",
+                },
+              },
+              layout: {
+                padding: 5,
+              },
+            },
+          });
+        } catch (e) {
+          console.error("Błąd podczas inicjalizacji wykresu Chart.js:", e);
+        }
+      });
+    </script>
+  </body>
+</html>
