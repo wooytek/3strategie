@@ -12,16 +12,16 @@ p_eurusd.png
 p_usdjpy.png
 
 kody:
-analyze-usdjpy-lambda.py
-dashboard-usdjpy-lambda.py
-eurusd-analyzer.py
-fetch_eurusd_lambda.py
-fetch-usdjpy-lambda.py
-save-usdjpy-lambda.py
-summary_dashboard.html
-index_usdjpy.html
-eurusd_pnl_chart_only.html
-usdjpy_pnl_chart_only.html
+analyze-usdjpy-lambda.py  
+dashboard-usdjpy-lambda.py  
+eurusd-analyzer.py  
+fetch_eurusd_lambda.py  
+fetch-usdjpy-lambda.py  
+save-usdjpy-lambda.py  
+summary_dashboard.html  
+index_usdjpy.html  
+eurusd_pnl_chart_only.html  
+usdjpy_pnl_chart_only.html  
 
 Strona główna: 
 https://3strategie.s3.eu-central-1.amazonaws.com/summary_dashboard.html
