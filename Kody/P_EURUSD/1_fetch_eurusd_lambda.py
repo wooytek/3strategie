@@ -5,105 +5,167 @@ import urllib.parse
 import urllib.request
 import psycopg2
 import psycopg2.extensions
+import decimal
 from datetime import datetime, timezone
+
+
 import boto3
 
 
-
-# Konfiguracja loggera
+# Konfiguracja logów
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO) # Ustawia poziom logowania na INFO
 
-# Konwersja typów numerycznych z bazy danych
+
+# Psycopg2 - automatyczna konwersja Decimal na float
+# Rejestracja niestandardowej konwersji typu dla Psycopg2.
+
 def cast_decimal_to_float(value, cursor):
-    """Konwertuje typ Decimal z bazy danych na float w Pythonie."""
-    return float(value) if value is not None else None
+    """
+    Funkcja pomocnicza do konwersji wartości Decimal na float.
+    Używana przez Psycopg2 do automatycznego mapowania typów.
+    """
+    if value is None:
+        return None
+    return float(value)
 
 psycopg2.extensions.register_type(
     psycopg2.extensions.new_type(
-        psycopg2.extensions.DECIMAL.values, 'DEC2FLOAT', cast_decimal_to_float
+        psycopg2.extensions.DECIMAL.values, # Określa typy PostgreSQL do zmapowania (wszystkie typy DECIMAL)
+        'DEC2FLOAT',                       # Nazwa nowej konwersji (dowolna nazwa)
+        cast_decimal_to_float              # Funkcja konwertująca
     )
 )
 
-# Inicjalizacja klienta AWS Systems Manager 
-ssm_client = boto3.client('ssm') [cite: 111]
+# Inicjalizacja klienta SSM (Systems Manager Parameter Store) poza funkcją handler.
+# Pozwala to na ponowne wykorzystanie klienta w kolejnych "gorących" uruchomieniach funkcji Lambda (optymalizacja "cold starts").
+ssm_client = boto3.client('ssm')
 
-# -----------------------------------------------------------------------------
-# Główna funkcja Lambda
-# -----------------------------------------------------------------------------
+
+# Funkcja główna Lambda
+
 def lambda_handler(event, context):
     """
-    Pobiera aktualny kurs EUR/USD z zewnętrznego API, a następnie zapisuje go
-    w bazie danych PostgreSQL wraz ze znacznikiem czasu UTC.
+    Główna funkcja Lambda, która jest wywoływana w celu:
+    1. Pobrania klucza API z AWS Parameter Store.
+    2. Pobrania danych połączenia z bazą danych PostgreSQL ze zmiennych środowiskowych.
+    3. Wykonania zapytania do zewnętrznego API w celu pobrania kursu EUR/USD.
+    4. Zapisania pobranego kursu do bazy danych PostgreSQL.
+    
+    `event`: Słownik zawierający dane wejściowe dla funkcji Lambda (nieużywane bezpośrednio w tej funkcji,
+             gdyż jest ona prawdopodobnie wyzwalana harmonogramem - EventBridge/CloudWatch Events).
+    `context`: Obiekt kontekstu funkcji Lambda (nieużywane bezpośrednio).
     """
     try:
-        # Pobranie klucza API z AWS Parameter Store ---
+        # 1️⃣ Pobieranie secretu (klucza API) z Parameter Store
+        # Funkcja get_parameter służy do pobierania wartości parametrów.
+        # `Name`: Nazwa parametru w Parameter Store.
+        # `WithDecryption=True`: Konieczne, jeśli wartość parametru jest zaszyfrowana (np. przy użyciu AWS KMS).
         try:
-            response = ssm_client.get_parameter(Name="/currency-db/apikey", WithDecryption=True) [cite: 112]
+            response = ssm_client.get_parameter(
+                Name="/currency-db/apikey",
+                WithDecryption=True
+            )
             api_key = response["Parameter"]["Value"]
-            logger.info("Klucz API został pomyślnie pobrany z AWS Parameter Store.")
+            logger.info("API_KEY pobrany z AWS Parameter Store.")
         except ssm_client.exceptions.ParameterNotFound:
-            error_msg = "Parametr '/currency-db/apikey' nie został znaleziony w Parameter Store." [cite: 113]
-            logger.error(error_msg) [cite: 114]
-            raise EnvironmentError(error_msg)
+            # Obsługa błędu, jeśli parametr nie zostanie znaleziony.
+            error_msg = "Parameter '/currency-db/apikey' not found in Parameter Store."
+            logger.error(error_msg)
+            raise EnvironmentError(error_msg) # Podnoszenie błędu środowiskowego
         except Exception as e:
-            error_msg = f"Błąd podczas pobierania klucza API z Parameter Store: {e}"
+            # Ogólna obsługa innych błędów podczas pobierania API_KEY.
+            error_msg = f"Błąd podczas pobierania API_KEY z Parameter Store: {e}"
             logger.error(error_msg)
             raise EnvironmentError(error_msg)
 
-        # Wczytanie danych dostępowych do bazy danych ze zmiennych środowiskowych ---
-        required_env_vars = ["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"]
-        missing_vars = [var for var in required_env_vars if not os.getenv(var)] [cite: 115]
-        if missing_vars:
-            error_msg = f"Brakujące zmienne środowiskowe: {', '.join(missing_vars)}"
+        # 2️⃣ Pobieranie zmiennych środowiskowych dla połączenia z bazą danych
+        # Lista wymaganych zmiennych środowiskowych dla połączenia z bazą danych.
+        env_vars = ["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"]
+        # Sprawdzenie, czy wszystkie wymagane zmienne środowiskowe są ustawione.
+        missing = [v for v in env_vars if not os.getenv(v)]
+        if missing:
+            error_msg = f"Brakuje zmiennych środowiskowych bazy danych: {', '.join(missing)}"
             logger.error(error_msg)
             raise EnvironmentError(error_msg)
 
+        # Przypisanie wartości zmiennych środowiskowych do lokalnych zmiennych.
         db_host = os.environ["DB_HOST"]
         db_name = os.environ["DB_NAME"]
-        db_user = os.environ["DB_USER"] [cite: 116]
-        db_password = os.environ["DB_PASSWORD"] [cite: 116]
+        db_user = os.environ["DB_USER"]
+        db_password = os.environ["DB_PASSWORD"]
+        # Port bazy danych, domyślnie 5432 dla PostgreSQL, jeśli nie jest ustawiony.
         db_port = os.getenv("DB_PORT", "5432")
 
-        # zapytanie do API o aktualny kurs waluty
-        params = {"access_key": api_key, "from": "EUR", "to": "USD", "amount": "1"} [cite: 117]
-        url = "https://api.exconvert.com/convert?" + urllib.parse.urlencode(params) [cite: 118]
+        # 3️⃣ Zapytanie do zewnętrznego API (bez użycia biblioteki requests)
+        # Parametry zapytania do API do pobrania kursu EUR/USD.
+        params = {
+            "access_key": api_key,
+            "from": "EUR",
+            "to": "USD",
+            "amount": "1"
+        }
+        # Kodowanie parametrów i budowanie pełnego URL.
+        url = "https://api.exconvert.com/convert?" + urllib.parse.urlencode(params)
+        
+        # Ustawienie nagłówka User-Agent dla zapytania. Jest to dobra praktyka.
         headers = {"User-Agent": "fetch-eur-usd-lambda/1.0"}
 
-        logger.info(f"Wysyłanie zapytania do API: {url}")
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"Błąd API, status HTTP: {resp.status}, odpowiedź: {resp.read().decode()}")
-            api_data = json.loads(resp.read().decode())
-
-        # odpowiedź API i zapis kursu w bazie danych
-        result_data = api_data.get("result", {})
-        rate_value = result_data.get("rate") or result_data.get("USD")
+        logger.info("Wysyłanie zapytania do API: %s", url)
         
-        if rate_value is None:
-            raise ValueError(f"Nie znaleziono kursu ('rate' lub 'USD') w odpowiedzi API: {api_data}")
-            
-        rate = float(rate_value) [cite: 120]
-        logger.info(f"Pobrany kurs EUR/USD: {rate:.6f}")
+        # Utworzenie obiektu Request i wykonanie zapytania.
+        req = urllib.request.Request(url, headers=headers)
+        # Otworzenie połączenia URL, z timeoutem 10 sekund. Użycie `with` zapewnia zamknięcie połączenia.
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            # Sprawdzenie kodu statusu odpowiedzi HTTP.
+            if resp.status != 200:
+                raise RuntimeError(f"HTTP {resp.status} z API: {resp.read().decode()}")
+            # Odczytanie i dekodowanie odpowiedzi, a następnie parsowanie JSON.
+            data = json.loads(resp.read().decode())
 
-        conn_params = {"host": db_host, "dbname": db_name, "user": db_user, "password": db_password, "port": db_port} [cite: 121]
-        with psycopg2.connect(**conn_params) as conn, conn.cursor() as cur:
+        # 4️⃣ Parsowanie odpowiedzi API
+        result = data.get("result", {}) # Bezpieczne pobranie klucza 'result', domyślnie pusty słownik
+        # Pobranie kursu walutowego, może być pod kluczem 'rate' lub 'USD'.
+        rate_value = result.get("rate") or result.get("USD")
+        
+        # Dodatkowa walidacja, czy kurs został faktycznie pobrany.
+        if rate_value is None:
+            raise ValueError(f"Brak klucza 'rate' lub 'USD' w odpowiedzi API: {data}")
             
+        rate = float(rate_value) # Konwersja kursu na typ float
+        logger.info("Pobrany kurs EUR/USD: %.6f", rate)
+
+        # 5️⃣ Połączenie z bazą PostgreSQL i zapis danych
+        # Nawiązanie połączenia z bazą danych PostgreSQL przy użyciu Psycopg2.
+        conn = psycopg2.connect(
+            host=db_host,
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+            port=db_port
+        )
+        # Użycie `with conn` gwarantuje, że połączenie zostanie prawidłowo zamknięte i transakcje zatwierdzone.
+        with conn, conn.cursor() as cur:
+            # Wykonanie zapytania SQL INSERT do tabeli 'eurusd_rates'.
+            # Timestamp jest jawnie ustawiany na UTC
             cur.execute(
                 "INSERT INTO eurusd_rates (timestamp, rate) VALUES (%s, %s)",
-                (datetime.now(timezone.utc), rate) [cite: 122]
+                (datetime.now(timezone.utc), rate) 
             )
 
-        logger.info("Kurs został pomyślnie zapisany w bazie danych.")
+        logger.info("Zapisano kurs do bazy.")
+        
+        # Zwrócenie odpowiedzi HTTP 200 z pobranym kursem.
         return {
             "statusCode": 200,
             "body": json.dumps({"rate": rate})
         }
 
     except Exception as exc:
-        logger.exception("Wystąpił krytyczny błąd w funkcji Lambda.")
+        # Ogólna obsługa błędów. `logger.exception` loguje pełny traceback.
+        logger.exception("Błąd w funkcji Lambda") 
+        # Zwrócenie statusu 500 (Internal Server Error) w przypadku błędu.
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(exc)})
+            "body": f"Błąd: {str(exc)}"
         }
