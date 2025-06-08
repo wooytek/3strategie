@@ -23,6 +23,7 @@ index_usdjpy.html
 eurusd_pnl_chart_only.html  
 usdjpy_pnl_chart_only.html  
 
+
 Strona główna:   
 https://3strategie.s3.eu-central-1.amazonaws.com/summary_dashboard.html  
 Podstrona USDJPY:  
