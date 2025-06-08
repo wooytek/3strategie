@@ -3,7 +3,7 @@ Big data gr.2 2024/2025
  
 projekt "3strategie"
  
-opis:
+opis:                                                                                                                                                      
 projekt_3strategie.pdf
 
 diagramy architektury (również wbudowane w projekt_3strategie.pdf):                                                                                         
