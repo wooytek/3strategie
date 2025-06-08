@@ -6,7 +6,7 @@ projekt "3strategie"
 opis:
 projekt_3strategie.pdf
 
-diagramy architektury(również wbudowane w projekt_3strategie.pdf):
+diagramy architektury(również wbudowane w projekt_3strategie.pdf):                                                                                          
 3strategie.png
 p_eurusd.png
 p_usdjpy.png
