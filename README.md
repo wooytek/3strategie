@@ -2,7 +2,7 @@
 Big data gr.2 2024/2025
 
 projekt "3strategie"
-
+ 
 opis:
 projekt_3strategie.pdf
 
