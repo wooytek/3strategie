@@ -1,69 +1,82 @@
-# save-usdjpy-lambda.py
 import json
 import os
 import logging
 import boto3
 import threading
 
-# -----------------------------------------------------------------------------
-# Konfiguracja
-# -----------------------------------------------------------------------------
+# Konfiguracja loggera do logowania informacji o przebiegu funkcji Lambda
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO) # Ustawia poziom logowania na INFO
 
-# Inicjalizacja klienta Lambda
+# Inicjalizacja klienta AWS Lambda.
 lambda_cli = boto3.client("lambda")
 
-ANALYZE_FN = os.environ.get('ANALYZE_LAMBDA')
+# Nazwa funkcji Lambda, która ma być wywoływana asynchronicznie do analizy danych.
+ANALYZE_FN = os.environ.get('ANALYZE_LAMBDA') 
 
-# -----------------------------------------------------------------------------
-# Funkcje pomocnicze
-# -----------------------------------------------------------------------------
+# Logowanie informacji o środowisku i nazwie funkcji do analizy.
+# Pomaga to w weryfikacji, czy konfiguracja została poprawnie załadowana.
+logger.info("Środowisko OK – ANALYZE_LAMBDA = %s", ANALYZE_FN)
+
 def async_invoke(payload):
     """
-    Asynchronicznie wywołuje funkcję Lambda do analizy strategii,
-    przekazując jej klucz nowego obiektu S3.
+    Wywołuje funkcję Lambda określoną przez `ANALYZE_FN` asynchronicznie.
+    Wywołanie asynchroniczne ('Event') oznacza, że funkcja wywołująca (save-lambda)
+    nie czeka na zakończenie wywołanej funkcji (analyze-lambda).
+    
+    `payload`: Dane (zwykle słownik JSON) do przekazania wywoływanej funkcji.
     """
-    if not ANALYZE_FN:
-        logger.error("Brak zdefiniowanej nazwy funkcji ANALYZE_LAMBDA.")
-        return
     try:
         response = lambda_cli.invoke(
-            FunctionName=ANALYZE_FN,
-            InvocationType='Event',  # Wywołanie asynchroniczne
-            Payload=json.dumps(payload)
+            FunctionName=ANALYZE_FN, # Nazwa funkcji Lambda do wywołania
+            InvocationType='Event',  # Typ wywołania: asynchroniczne (nie czeka na odpowiedź)
+            Payload=json.dumps(payload) # Dane przekazywane w formacie JSON
         )
-        logger.info(f"Wywołanie analizy dla {payload.get('raw_key')} zlecone. StatusCode: {response['StatusCode']}")
+        # Logowanie statusu wywołania. 'StatusCode' 202 oznacza, że wywołanie zostało przyjęte.
+        logger.info("Invoke wysłany – StatusCode: %s", response['StatusCode'])
     except Exception as e:
-        logger.error(f"Błąd podczas asynchronicznego wywołania funkcji {ANALYZE_FN}: {str(e)}")
+        # Obsługa błędów, jeśli wywołanie funkcji Lambda nie powiedzie się.
+        logger.error("Błąd invoke: %s", str(e))
 
-# -----------------------------------------------------------------------------
-# Główna funkcja Lambda
-# -----------------------------------------------------------------------------
 def lambda_handler(event, context):
     """
-    Funkcja uruchamiana przez zdarzenie S3 (stworzenie nowego obiektu).
-    Jej zadaniem jest natychmiastowe uruchomienie w tle funkcji
-    analizującej (`analyze-usdjpy-lambda`).
+    Główna funkcja Lambda, która jest wywoływana w odpowiedzi na zdarzenia (np. nowe pliki w S3).
+    Jej zadaniem jest pobranie klucza nowo dodanego obiektu z S3 i asynchroniczne wywołanie
+    funkcji analitycznej.
+    
+    `event`: Słownik zawierający dane zdarzenia. W tym przypadku oczekuje się zdarzenia z S3.
+    `context`: Obiekt kontekstu funkcji Lambda.
     """
+    logger.info("=== save-usdjpy-lambda start ===")
     try:
-        # Pobranie nowego klucza obiektu z danych zdarzenia
-        key = event['Records'][0]['s3']['object']['key']
-        logger.info(f"Wykryto nowy plik tick w S3: {key}")
+        # Pobranie informacji o nowym obiekcie S3 z rekordu zdarzenia.
+        # Zakłada, że zdarzenie S3 ma strukturę z 'Records'[0]['s3']['object']['key'].
+        rec = event['Records'][0]
+        key = rec['s3']['object']['key'] # Klucz (nazwa pliku) nowo utworzonego obiektu w S3
+        logger.info("Nowy tick w S3: %s", key)
 
+        # Przygotowanie ładunku (payload) dla funkcji analitycznej.
+        # Przekazujemy klucz nowo dodanego pliku raw_key, aby funkcja analityczna mogła go przetworzyć.
         payload = {'raw_key': key}
+        logger.info("Przygotowany payload do invoke: %s", payload)
 
-        # Uruchomienie wywołania w osobnym wątku
+        # Uruchomienie wywołania funkcji `async_invoke` w osobnym wątku.
+        # `save-lambda` może szybko zwrócić odpowiedź, podczas gdy `analyze-lambda` pracuje w tle.
         threading.Thread(target=async_invoke, args=(payload,)).start()
 
+        logger.info("Zakończono save-lambda (analyze uruchomiona w tle)")
+
+        # Zwrócenie odpowiedzi HTTP 202 (Accepted), wskazującej, że żądanie zostało przyjęte do przetworzenia.
         return {
-            'statusCode': 202, # Accepted
-            'body': f'Analiza dla klucza {key} została zlecona.'
+            'statusCode': 202,
+            'body': f'Analyze triggered for {key}'
         }
 
-    except (KeyError, IndexError) as e:
-        logger.error(f"Błąd parsowania zdarzenia S3: {str(e)}")
-        return {'statusCode': 400, 'body': 'Niepoprawny format zdarzenia S3.'}
     except Exception as e:
-        logger.error(f"Nieoczekiwany błąd w save-usdjpy-lambda: {str(e)}")
-        return {'statusCode': 500, 'body': str(e)}
+        # Ogólna obsługa błędów, jeśli coś pójdzie nie tak w funkcji `save-lambda`.
+        logger.error("Błąd w save-lambda: %s", str(e))
+        # Zwrócenie statusu 500 (Internal Server Error) w przypadku błędu.
+        return {
+            'statusCode': 500,
+            'body': str(e)
+        }
