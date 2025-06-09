@@ -17,9 +17,8 @@ Kody:
        save-usdjpy-lambda.py                                                                                                                                                                                                                                                  
        analyze-usdjpy-lambda.py                                                                                                                                                                                                                                                
        dashboard-usdjpy-lambda.py                                                                                                                                                                                                                                              
-       index_usdjpy.html  
-
-       usdjpy_pnl_chart_only.html    
+       index_usdjpy.html                                                                                                                                                                                                 
+       usdjpy_pnl_chart_only.html                                               
    P_EURUSD=================                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
        fetch_eurusd_lambda.py                                                                                                                                                                                                                                   
        eurusd-analyzer.py                                                                                                                                                                                                                                                 
