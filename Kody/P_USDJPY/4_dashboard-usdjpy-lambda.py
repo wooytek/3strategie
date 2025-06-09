@@ -356,7 +356,7 @@ def lambda_handler(event, context):
 <div class="tbl-inner">
 <table><thead>
 <tr><th>Open time</th><th>Open price</th><th>Dir</th><th>SL</th><th>TP</th><th>Close Price</th><th>Res Pips</th></tr>
-</thead><tbody>{rows_html(last_trades[:10])}</tbody></table></div></div>"""
+</thead><tbody>{rows_html(last_trades)}</tbody></table></div></div>"""
 
         # Logika sprawdzająca, czy należy wygenerować alert email.
         if len(closed_last) == 3:
