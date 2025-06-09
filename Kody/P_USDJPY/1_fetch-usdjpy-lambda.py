@@ -4,12 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal # Użycie Decimal do dokładnych obliczeń walutowych, aby uniknąć problemów z zmiennoprzecinkową arytmetyką (float)
 import boto3
 
-# Inicjalizacja klienta AWS Systems Manager (SSM).
-# SSM służy do bezpiecznego przechowywania i zarządzania kluczami API, hasłami i innymi parametrami konfiguracyjnymi.
 ssm = boto3.client("ssm")
 
 # Pobranie klucza API z Parameter Store w SSM.
-# Klucz API jest przechowywany pod nazwą "/currency-db/apikey" i jest szyfrowany (WithDecryption=True).
 API_KEY = ssm.get_parameter(
     Name="/currency-db/apikey", WithDecryption=True
 )["Parameter"]["Value"]
@@ -21,16 +18,13 @@ BUCKET = os.environ["S3BUCKET_RAW"]
 # Ten plik JSON będzie przechowywał listę kluczy (ścieżek do plików) ostatnich ticków.
 CACHE_KEY = "state/cache.json"
 
-# Inicjalizacja klienta AWS S3 do interakcji z bucketami S3 (zapisywanie i odczytywanie obiektów).
+# Inicjalizacja klienta AWS S3 do interakcji z bucketami S3.
 s3 = boto3.client("s3")
 
 def lambda_handler(event, _):
     """
     Główna funkcja Lambda, która jest wywoływana w celu pobrania najnowszego kursu USD/JPY,
     zapisania go do S3 i zaktualizowania cache'a ticków.
-    
-    `event`: Słownik zawierający dane wejściowe dla funkcji Lambda (nieużywane w tej funkcji).
-    `_`: Obiekt kontekstu funkcji Lambda (nieużywane w tej funkcji).
     """
     # 1️⃣ Pobranie kursu USD/JPY z zewnętrznego API
     # Konstrukcja URL do API konwersji walut (exconvert.com).
@@ -41,7 +35,6 @@ def lambda_handler(event, _):
     })
     
     # Wykonanie zapytania HTTP do API i parsowanie odpowiedzi JSON.
-    # Użycie `timeout=10` zapobiega zbyt długiemu oczekiwaniu na odpowiedź API.
     data = json.loads(urllib.request.urlopen(url, timeout=10).read().decode())
     
     # Wyodrębnienie kursu walutowego z odpowiedzi API.
