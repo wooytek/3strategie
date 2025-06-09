@@ -1,27 +1,31 @@
 # 3strategie
 Big data gr.2 2024/2025
  
-projekt "3strategie"
+=== projekt "3strategie" ===
  
 opis:                                                                                                                                                      
-projekt_3strategie.pdf
+  projekt_3strategie.pdf
 
-diagramy architektury (również wbudowane w projekt_3strategie.pdf):                                                                                         
-3strategie.png                                                                                                                                              
-p_eurusd.png                                                                                                                                               
-p_usdjpy.png                                                                                    
+Diagramy:                                                                                       
+    3strategie.png                                                                                                                                              
+    p_eurusd.png                                                                                                                                               
+    p_usdjpy.png                                                                                    
 
-kody:                                                                                                                                                      
-analyze-usdjpy-lambda.py  
-dashboard-usdjpy-lambda.py  
-eurusd-analyzer.py  
-fetch_eurusd_lambda.py  
-fetch-usdjpy-lambda.py  
-save-usdjpy-lambda.py  
-summary_dashboard.html  
-index_usdjpy.html  
-eurusd_pnl_chart_only.html  
-usdjpy_pnl_chart_only.html  
+Kody:
+   P_USDJPY=================
+       fetch-usdjpy-lambda.py
+       save-usdjpy-lambda.py         
+       analyze-usdjpy-lambda.py      
+       dashboard-usdjpy-lambda.py    
+       index_usdjpy.html             
+   P_EURUSD=================
+       usdjpy_pnl_chart_only.html 
+       fetch_eurusd_lambda.py
+       eurusd-analyzer.py              
+       eurusd_pnl_chart_only.html
+   3strategie=================
+       summary_dashboard.html   
+
 
 
 Strona główna:   
