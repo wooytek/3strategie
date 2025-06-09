@@ -2,24 +2,18 @@ import os, json, math, psycopg2, statistics, traceback, boto3, logging
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-# konfiguracja loggera 
+# ───────── konfiguracja loggera ─────────
 logger = logging.getLogger()
-logger.setLevel(logging.INFO) # Ustawia poziom logowania na INFO, aby widzieć komunikaty informacyjne i błędy.
+logger.setLevel(logging.INFO)
 
-#  Global S3 Client and Constants 
-s3_client = boto3.client("s3") # Globalny klient S3 do interakcji z usługą Amazon S3.
-# Klucze (ścieżki) dla plików HTML z dashboardami EUR/USD w bucketcie S3.
+# ───────── Global S3 Client and Constants ─────────
+s3_client = boto3.client("s3")
 KEY_EURUSD_MAIN_DASHBOARD_HTML = "eurusd_dashboard_index.html"
 KEY_EURUSD_PNL_CHART_ONLY_HTML = "eurusd_pnl_chart_only.html"
-BUCKET_TARGET = "3strategie" # Nazwa docelowego bucketu S3
+BUCKET_TARGET = "3strategie"
 
-#  HTML helpers (istniejące) 
+# ───────── HTML helpers (istniejące) ─────────
 def rows_to_html(rows_for_table):
-    """
-    Konwertuje listę wierszy danych transakcyjnych na fragmenty HTML tabeli.
-    Każdy wiersz to <tr>...</tr> z odpowiednio sformatowanymi danymi.
-    Zwraca sformatowany wynik PnL w pipsach z odpowiednim kolorem.
-    """
     return "\n".join(
         f"<tr><td>{r[1].strftime('%Y-%m-%d %H:%M')}</td><td>{r[2]:.5f}</td><td>{r[3]}</td>"
         f"<td>{r[4]:.5f}</td><td>{r[5]:.5f}</td><td>{'-' if r[8] is None else f'{r[8]:.5f}'}</td>"
@@ -28,15 +22,10 @@ def rows_to_html(rows_for_table):
     )
 
 def to_float(rowlist):
-    """
-    Przetwarza listę wierszy (pobranych z bazy danych) na listę krotek (data, wynik PnL float).
-    Odpowiada za prawidłową konwersję pól daty i PnL na odpowiednie typy,
-    obsługując różne formaty daty w danych wejściowych.
-    """
     processed_data = []
     for r_item in rowlist:
-        current_close_time = r_item[6] # Indeks 6 to close_time
-        current_open_time = r_item[1] # Indeks 1 to open_time
+        current_close_time = r_item[6]
+        current_open_time = r_item[1]
         parsed_close_time = None
         if current_close_time is not None:
             if isinstance(current_close_time, datetime):
@@ -47,7 +36,6 @@ def to_float(rowlist):
                 except (ValueError, TypeError):
                     logger.error(f"Failed to parse close_time from type {type(current_close_time)}: {current_close_time}", exc_info=True)
                     raise AttributeError(f"Could not convert close_time '{current_close_time}' (type: {type(current_close_time)}) to datetime. Check DB schema and data.")
-        
         parsed_open_time = None
         if isinstance(current_open_time, datetime):
             parsed_open_time = current_open_time
@@ -57,89 +45,52 @@ def to_float(rowlist):
             except (ValueError, TypeError):
                 logger.error(f"Unexpected type for open_time (r[1]): {type(r_item[1])} with value {r_item[1]}. Expected datetime. Please check DB schema.", exc_info=True)
                 raise AttributeError(f"Could not convert open_time '{current_open_time}' (type: {type(current_open_time)}) to datetime. Check DB schema and data.")
-        
-        # Używa daty zamknięcia, jeśli dostępna, w przeciwnym razie daty otwarcia.
         date_to_use = parsed_close_time.date() if parsed_close_time else parsed_open_time.date()
-        processed_data.append((date_to_use, float(r_item[7] or 0))) # Indeks 7 to result_pips
+        processed_data.append((date_to_use, float(r_item[7] or 0)))
     return processed_data
 
 def cumulative_by_day(data_list):
-    """
-    Oblicza skumulowany zysk/stratę (PnL) dla każdej strategii z podziałem na dni.
-    Wypełnia brakujące dni zerami, aby zapewnić ciągłość danych na wykresie.
-    Zwraca dwie listy: daty (etykiety osi X) i skumulowane wartości PnL.
-    """
     daily_pnl = defaultdict(float)
     for trade_date, pnl in data_list:
         daily_pnl[trade_date] += pnl
-    
-    if not daily_pnl: return [], [] # Jeśli brak danych, zwróć puste listy
-
+    if not daily_pnl: return [], []
     sorted_dates = sorted(daily_pnl.keys())
     if not sorted_dates: return [], []
-    
     start_date, end_date = sorted_dates[0], sorted_dates[-1]
-    
     all_days = []
     current_date = start_date
     while current_date <= end_date:
         all_days.append(current_date)
-        current_date += timedelta(days=1) # Iteracja dzień po dniu
-
+        current_date += timedelta(days=1)
     cumulative_results = []
     current_cumulative_pnl = 0.0
     for d in all_days:
-        current_cumulative_pnl += daily_pnl[d] # Dodaje PnL z danego dnia (0, jeśli nie było transakcji)
-        cumulative_results.append(round(current_cumulative_pnl, 1)) # Zaokrągla do jednego miejsca po przecinku
-    
+        current_cumulative_pnl += daily_pnl[d]
+        cumulative_results.append(round(current_cumulative_pnl, 1))
     return [d.strftime('%Y-%m-%d') for d in all_days], cumulative_results
 
 def align_data_to_labels(original_labels, original_data, common_labels):
-    """
-    Wyrównuje dane PnL strategii do wspólnego zestawu etykiet dat,
-    zapewniając, że wszystkie strategie mają dane dla tych samych dni,
-    co jest kluczowe dla prawidłowego wyświetlania wielu linii na jednym wykresie.
-    Wypełnia luki wartościami z poprzedniego dnia lub zerem.
-    """
     aligned_data, original_map, current_val = [], dict(zip(original_labels, original_data)), 0.0
     if not common_labels: return []
-    
     if original_labels and original_data:
-        # Znajduje pierwszą datę w common_labels, która jest również w original_map
         first_known_label_in_common = next((lbl for lbl in common_labels if lbl in original_map), None)
-        
         if first_known_label_in_common:
-            # Wartość początkowa dla wypełniania luk przed pierwszą znaną datą.
-            initial_fill_value = original_map[first_known_label_in_common]
-            found_first_known = False
-            temp_aligned_data = []
-            
+            initial_fill_value, found_first_known, temp_aligned_data = original_map[first_known_label_in_common], False, []
             for label_date_str in common_labels:
                 if label_date_str in original_map:
-                    current_val = original_map[label_date_str]
-                    found_first_known = True
+                    current_val, found_first_known = original_map[label_date_str], True
                 elif not found_first_known:
-                    # Jeśli jeszcze nie znaleziono pierwszej znanej daty, użyj początkowej wartości wypełnienia.
                     current_val = initial_fill_value
                 temp_aligned_data.append(current_val)
             return temp_aligned_data
-        else:
-            # Jeśli żadna data z original_labels nie jest w common_labels, wypełnij zerami.
-            return [current_val] * len(common_labels)
-    
-    # Jeśli oryginalne dane są puste, wypełnij zerami.
+        else: return [current_val] * len(common_labels)
     for label_date_str in common_labels:
-        if label_date_str in original_map:
-            current_val = original_map[label_date_str]
+        if label_date_str in original_map: current_val = original_map[label_date_str]
         aligned_data.append(current_val)
     return aligned_data
 
 def to_html_table(title, rows_from_fetch):
-    """
-    Generuje kompletną tabelę HTML dla danych transakcyjnych strategii,
-    wraz z tytułem i sumą PnL w pipsach.
-    """
-    tot = sum(float(r[7] or 0) for r in rows_from_fetch) # Sumuje pipsy z wszystkich transakcji.
+    tot = sum(float(r[7] or 0) for r in rows_from_fetch)
     return f"""
 <div class="tbl">
   <h2>{title} (Σ {tot:+.1f} pips)</h2>
@@ -154,26 +105,14 @@ def to_html_table(title, rows_from_fetch):
 </div>"""
 
 def prepare_pnl_chart_data(s1_trades, s2_trades, s3_trades, logger_instance):
-    """
-    Przygotowuje dane dla wykresów PnL wszystkich trzech strategii.
-    Oblicza skumulowane PnL dla każdej strategii i wyrównuje je do wspólnego zestawu dat,
-    aby mogły być poprawnie wyświetlone na jednym wykresie.
-    Zwraca słownik zawierający etykiety dat i wyrównane dane PnL.
-    """
     logger_instance.info("prepare_pnl_chart_data: Rozpoczynam przetwarzanie danych dla wykresów P/L.")
-    
-    # Oblicza skumulowane PnL dla każdej strategii.
     pnl_labels1, cum1 = cumulative_by_day(to_float(s1_trades))
     pnl_labels2, cum2 = cumulative_by_day(to_float(s2_trades))
     pnl_labels3, cum3 = cumulative_by_day(to_float(s3_trades))
-    
-    # Tworzy zbiór wszystkich unikalnych dat ze wszystkich strategii.
     all_dates_set = set()
     if pnl_labels1: all_dates_set.update(pnl_labels1)
     if pnl_labels2: all_dates_set.update(pnl_labels2)
     if pnl_labels3: all_dates_set.update(pnl_labels3)
-    
-    # Sortuje unikalne daty, tworząc wspólną oś X dla wykresów.
     all_dates_common = sorted(list(all_dates_set))
     logger_instance.info(f"prepare_pnl_chart_data: Wszystkie unikalne daty posortowane: {len(all_dates_common)}")
     
@@ -185,7 +124,6 @@ def prepare_pnl_chart_data(s1_trades, s2_trades, s3_trades, logger_instance):
     else:
         min_date_val = all_dates_common[0]
         max_date_val = all_dates_common[-1]
-        # Wyrównanie danych każdej strategii do wspólnych dat.
         cum1_aligned = align_data_to_labels(pnl_labels1, cum1, all_dates_common)
         cum2_aligned = align_data_to_labels(pnl_labels2, cum2, all_dates_common)
         cum3_aligned = align_data_to_labels(pnl_labels3, cum3, all_dates_common)
@@ -199,26 +137,21 @@ def prepare_pnl_chart_data(s1_trades, s2_trades, s3_trades, logger_instance):
         "max_date_val": max_date_val  # Zwracamy bezpośrednio string daty lub None
     }
 
-#  Modified render_html (Main EURUSD Dashboard) Function ─────────
+# ───────── Modified render_html (Main EURUSD Dashboard) Function ─────────
 HOME_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" height="45px" viewBox="0 0 24 24" width="45px" fill="currentColor">
   <path d="M0 0h24v24H0V0z" fill="none"/>
   <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
-</svg>""" # SVG ikona "home" do umieszczenia na dashboardzie.
+</svg>"""
 
+# ───────── Modified render_html (Main EURUSD Dashboard) Function ─────────
 def render_main_eurusd_dashboard_html(rate_chart_labels, rate_chart_values, 
                                       s1_table_data, s2_table_data, s3_table_data,
                                       pnl_prepared_data, logger_instance):
-    """
-    Generuje pełny kod HTML dla głównego dashboardu EUR/USD.
-    Zawiera wykresy kursu walutowego i skumulowanego PnL dla każdej strategii,
-    oraz tabele z ostatnimi transakcjami.
-    """
-    # Generowanie tabel HTML dla każdej strategii.
+    
     s1_html_table = to_html_table("Strategia 1 – Klasyczna", s1_table_data)
     s2_html_table = to_html_table("Strategia 2 – Anomalie", s2_table_data)
     s3_html_table = to_html_table("Strategia 3 – Fraktal + SMA", s3_table_data)
     
-    # Formatowanie danych do JSON dla osadzenia w JavaScript.
     formatted_rate_labels_str = json.dumps(rate_chart_labels)
     formatted_rate_values_str = json.dumps(rate_chart_values)
     
@@ -230,7 +163,6 @@ def render_main_eurusd_dashboard_html(rate_chart_labels, rate_chart_values,
     min_date_pnl_for_js = json.dumps(pnl_prepared_data["min_date_val"])
     max_date_pnl_for_js = json.dumps(pnl_prepared_data["max_date_val"])
 
-    # Główny szablon HTML dashboardu.
     html = """<!doctype html><html lang="pl"><head><meta charset=utf-8>
     <title>Dashboard EUR/USD</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -306,10 +238,6 @@ def render_main_eurusd_dashboard_html(rate_chart_labels, rate_chart_values,
     return html
 
 def render_eurusd_pnl_chart_only_html(pnl_prepared_data):
-    """
-    Generuje kod HTML dla wykresu PnL EUR/USD, który ma być osadzony jako samodzielny element.
-    Jest to uproszczona wersja dashboardu, zawierająca tylko wykres PnL.
-    """
     # Zbuduj listę datasetów jako strukturę Pythona
     datasets_python_structure = [
         {
@@ -334,7 +262,7 @@ def render_eurusd_pnl_chart_only_html(pnl_prepared_data):
             "fill": False
         }
     ]
-    # Skonwertuj całą strukturę datasetów do stringa JSON.
+    # Skonwertuj całą strukturę datasetów do stringa JSON
     # Ten string będzie wyglądał np. tak: "[{\"label\": \"Strategia 1...\", ...}, {...}]"
     datasets_json_str = json.dumps(datasets_python_structure)
     
@@ -430,13 +358,12 @@ def render_eurusd_pnl_chart_only_html(pnl_prepared_data):
 </html>""" % (formatted_x_labels_pnl, datasets_json_str, min_date_for_js, max_date_for_js)
     return html_content
 
-#  DB helper 
-def db():
-    """
-    Ustanawia i zwraca połączenie z bazą danych PostgreSQL.
-    Pobiera dane połączenia ze zmiennych środowiskowych.
-    Ustawia autocommit na True, co oznacza, że każda operacja jest automatycznie zatwierdzana.
-    """
+# Reszta kodu (DB helper, PARAMS, safe_rsi, handle_strategy, fetch, lambda_handler)
+# pozostaje taka sama jak w ostatnio przesłanym pliku (eurusd.txt),
+# ponieważ logi wskazują, że te części działają poprawnie aż do momentu renderowania HTML.
+
+# ───────── DB helper (istniejące) ─────────
+def db(): #
     conn = psycopg2.connect(
         host=os.getenv("DB_HOST"), 
         dbname=os.getenv("DB_NAME"), 
@@ -444,293 +371,240 @@ def db():
         password=os.getenv("DB_PASSWORD"), 
         port=os.getenv("DB_PORT", "5432") 
     )
-    conn.autocommit = True # Ważne: każda zmiana jest natychmiast zapisywana w bazie danych.
+    conn.autocommit = True 
     return conn
 
-#PARAMS & INDICATORS 
-# Stop Loss (SL) i Take Profit (TP) wartości dla każdej strategii (w pipsach).
-SL1,TP1 = 20,30 # Strategia 1
-SL2,TP2 = 15,25 # Strategia 2
-SL3,TP3 = 12,24 # Strategia 3
-Z_TH=2.5 # Próg z-score dla strategii Anomalii.
-RSI_LEN=14 # Długość okresu dla wskaźnika RSI.
-SMA_LEN=50 # Długość okresu dla wskaźnika Simple Moving Average (SMA).
-EPS=1e-5 # Mała wartość epsilon używana do porównań cen zmiennoprzecinkowych.
+# ───────── PARAMS & INDICATORS (istniejące) ─────────
+SL1,TP1 = 20,30; SL2,TP2 = 15,25; SL3,TP3 = 12,24 #
+Z_TH=2.5; RSI_LEN=14; SMA_LEN=50; EPS=1e-5 #
 
-def safe_rsi(vals,n=14):
-    """
-    Oblicza wskaźnik siły względnej (RSI) dla danej serii wartości.
-    Zapewnia bezpieczne obliczenie RSI, obsługując przypadki z niewystarczającą ilością danych.
-    """
-    if len(vals) < n+1:
-        logger.warning(f"safe_rsi: Za mało danych ({len(vals)}) do obliczenia RSI({n}). Wymagane {n+1}.")
+def safe_rsi(vals,n=14): #
+    if len(vals) < n+1: #
+        logger.warning(f"safe_rsi: Za mało danych ({len(vals)}) do obliczenia RSI({n}). Wymagane {n+1}.") #
         return None
-    gains, losses = [], []
+    gains, losses = [], [] #
     
-    # Bierzemy tylko ostatnie N+1 wartości potrzebne do obliczenia RSI.
-    relevant_vals = vals[-(n + 1):] if len(vals) > (n + 1) else vals
+    relevant_vals = vals[-(n + 1):] if len(vals) > (n + 1) else vals #
 
-    if len(relevant_vals) < 2:
-        logger.warning(f"safe_rsi: Za mało wartości w relevant_vals ({len(relevant_vals)}) do obliczenia zmian.")
-        return None
+    if len(relevant_vals) < 2: #
+        logger.warning(f"safe_rsi: Za mało wartości w relevant_vals ({len(relevant_vals)}) do obliczenia zmian.") #
+        return None #
 
-    for i in range(1, len(relevant_vals)):
-        delta = relevant_vals[i] - relevant_vals[i-1]
-        if delta > 0:
-            gains.append(delta)
-            losses.append(0.0)
+    for i in range(1, len(relevant_vals)):  #
+        delta = relevant_vals[i] - relevant_vals[i-1] #
+        if delta > 0: #
+            gains.append(delta) #
+            losses.append(0.0) #
         else:
-            losses.append(abs(delta))
-            gains.append(0.0)
+            losses.append(abs(delta)) #
+            gains.append(0.0) #
     
-    if len(gains) < n : 
-        logger.warning(f"safe_rsi: Niewystarczająca liczba okresów zmian ({len(gains)}) do obliczenia RSI({n}).")
-        return None
+    if len(gains) < n :  #
+        logger.warning(f"safe_rsi: Niewystarczająca liczba okresów zmian ({len(gains)}) do obliczenia RSI({n}).") #
+        return None #
 
-    avg_gain = sum(gains) / n
-    avg_loss = sum(losses) / n
+    avg_gain = sum(gains) / n #
+    avg_loss = sum(losses) / n #
 
-    if avg_loss == 0:
-        return 100.0 if avg_gain > 0 else 50.0 # Unika dzielenia przez zero; RSI to 100 jeśli brak strat, 50 jeśli brak zysków
+    if avg_loss == 0: #
+        return 100.0 if avg_gain > 0 else 50.0  #
     
-    rs = avg_gain / avg_loss
-    rsi = 100.0 - (100.0 / (1.0 + rs))
-    return rsi
+    rs = avg_gain / avg_loss #
+    rsi = 100.0 - (100.0 / (1.0 + rs)) #
+    return rsi #
 
-# helpers
+# ───────── helpers (istniejące) ─────────
 def handle_strategy(cur, table, open_cond, sl, tp, price, time, eps,
-                    strategy_name, extra_cols=None):
-    """
-    Główna funkcja do zarządzania logiką handlową dla pojedynczej strategii.
-    Odpowiada za zamykanie otwartych transakcji (osiągnięcie SL/TP)
-    i otwieranie nowych transakcji na podstawie warunków otwarcia.
-    """
-    logger.info(f"handle_strategy: Przetwarzanie strategii '{strategy_name}' dla tabeli '{table}'.")
-    
-    # Pobierz wszystkie otwarte transakcje dla danej tabeli strategii.
+                    strategy_name, extra_cols=None): #
+    logger.info(f"handle_strategy: Przetwarzanie strategii '{strategy_name}' dla tabeli '{table}'.") #
     cur.execute(f"""SELECT trade_id,direction,sl_price,tp_price,open_price
-                   FROM {table} WHERE close_time IS NULL""")
-    open_trades = cur.fetchall()
-    logger.debug(f"handle_strategy '{strategy_name}': Znaleziono {len(open_trades)} otwartych transakcji.")
+                   FROM {table} WHERE close_time IS NULL""") #
+    open_trades = cur.fetchall() #
+    logger.debug(f"handle_strategy '{strategy_name}': Znaleziono {len(open_trades)} otwartych transakcji.") #
 
-    # Przetwórz otwarte transakcje: sprawdź, czy osiągnięto SL lub TP.
-    for trade_id,direction,sl_px,tp_px,open_px in open_trades:
-        sl_px,tp_px,open_px = map(float,(sl_px,tp_px,open_px))
-        
-        # Sprawdzenie, czy cena osiągnęła Take Profit lub Stop Loss.
-        hit_tp = price>=tp_px-eps if direction=='LONG' else price<=tp_px+eps
-        hit_sl = price<=sl_px+eps if direction=='LONG' else price>=sl_px-eps
-        
-        if hit_tp or hit_sl:
-            # Obliczanie PnL w pipsach.
-            pnl=(tp_px-open_px if hit_tp else sl_px-open_px)*(10000 if direction=='LONG' else -10000)
-            logger.info(f"handle_strategy '{strategy_name}': Zamykanie transakcji {trade_id} (kierunek: {direction}). Cena zamknięcia: {price}, {'TP' if hit_tp else 'SL'}. PnL: {pnl:.1f} pips.")
-            # Zaktualizuj zamkniętą transakcję w bazie danych.
+    for trade_id,direction,sl_px,tp_px,open_px in open_trades: #
+        sl_px,tp_px,open_px = map(float,(sl_px,tp_px,open_px)) #
+        hit_tp = price>=tp_px-eps if direction=='LONG' else price<=tp_px+eps #
+        hit_sl = price<=sl_px+eps if direction=='LONG' else price>=sl_px-eps #
+        if hit_tp or hit_sl: #
+            pnl=(tp_px-open_px if hit_tp else sl_px-open_px)*(10000 if direction=='LONG' else -10000) #
+            logger.info(f"handle_strategy '{strategy_name}': Zamykanie transakcji {trade_id} (kierunek: {direction}). Cena zamknięcia: {price}, {'TP' if hit_tp else 'SL'}. PnL: {pnl:.1f} pips.") #
             cur.execute(f"""UPDATE {table}
-                            SET close_time=%s,close_price=%s,result_pips=%s
-                            WHERE trade_id=%s""",(time,price,round(pnl,1),trade_id))
+                           SET close_time=%s,close_price=%s,result_pips=%s
+                           WHERE trade_id=%s""",(time,price,round(pnl,1),trade_id)) #
     
-    # Sprawdź, czy po zamknięciu transakcji (lub jeśli nie było otwartych) są jeszcze jakieś otwarte.
-    cur.execute(f"SELECT 1 FROM {table} WHERE close_time IS NULL LIMIT 1")
-    if cur.fetchone():
-        logger.info(f"handle_strategy '{strategy_name}': Istnieje już otwarta transakcja. Pomijam otwieranie nowej.")
-        return # Jeśli jest otwarta transakcja, nie otwieraj nowej.
+    cur.execute(f"SELECT 1 FROM {table} WHERE close_time IS NULL LIMIT 1") #
+    if cur.fetchone(): #
+        logger.info(f"handle_strategy '{strategy_name}': Istnieje już otwarta transakcja. Pomijam otwieranie nowej.") #
+        return #
 
-    # Sprawdź warunki do otwarcia nowej transakcji.
-    long_c, short_c = open_cond
-    if not (long_c or short_c):
-        logger.debug(f"handle_strategy '{strategy_name}': Brak sygnału do otwarcia nowej transakcji.")
-        return # Jeśli brak sygnału, nie otwieraj transakcji.
+    long_c, short_c = open_cond #
+    if not (long_c or short_c): #
+        logger.debug(f"handle_strategy '{strategy_name}': Brak sygnału do otwarcia nowej transakcji.") #
+        return #
     
-    # Określ kierunek transakcji i oblicz ceny SL/TP.
-    dir_action='LONG' if long_c else 'SHORT'
-    sl_px_val=round(price-0.0001*sl,6) if dir_action=='LONG' else round(price+0.0001*sl,6)
-    tp_px_val=round(price+0.0001*tp,6) if dir_action=='LONG' else round(price-0.0001*tp,6)
+    dir_action='LONG' if long_c else 'SHORT' #
+    sl_px_val=round(price-0.0001*sl,6) if dir_action=='LONG' else round(price+0.0001*sl,6) #
+    tp_px_val=round(price+0.0001*tp,6) if dir_action=='LONG' else round(price-0.0001*tp,6) #
     
-    logger.info(f"handle_strategy '{strategy_name}': Otwieranie nowej transakcji. Kierunek: {dir_action}, Cena: {price}, SL: {sl_px_val}, TP: {tp_px_val}")
+    logger.info(f"handle_strategy '{strategy_name}': Otwieranie nowej transakcji. Kierunek: {dir_action}, Cena: {price}, SL: {sl_px_val}, TP: {tp_px_val}") #
     
-    # Wstaw nową transakcję do bazy danych. Obsługa dodatkowych kolumn (np. z_score dla Anomalii).
-    if extra_cols:
-        col,val=extra_cols
-        cur.execute(
+    if extra_cols: #
+        col,val=extra_cols #
+        cur.execute( #
             f"""INSERT INTO {table}(open_time,open_price,direction,{col},sl_price,tp_price)
                 VALUES (%s,%s,%s,%s,%s,%s)""",(time,price,dir_action,val,sl_px_val,tp_px_val))
     else:
-        cur.execute(
+        cur.execute( #
             f"""INSERT INTO {table}(open_time,open_price,direction,sl_price,tp_price)
-                VALUES (%s,%s,%s,%s,%s)""",(time,price,dir_action,sl_px_val,tp_px_val))
-    logger.info(f"handle_strategy '{strategy_name}': Zakończono przetwarzanie.")
+                VALUES (%s,%s,%s,%s,%s)""",(time,price,dir_action,sl_px_val,tp_px_val)) #
+    logger.info(f"handle_strategy '{strategy_name}': Zakończono przetwarzanie.") #
 
 
-def fetch(cur, table):
-    """
-    Pobiera ostatnie 100 transakcji z danej tabeli strategii.
-    """
+def fetch(cur, table): #
     cur.execute(f"""SELECT trade_id, open_time, open_price, direction, sl_price, tp_price,
                             close_time, result_pips, close_price 
                    FROM {table}
                    ORDER BY trade_id DESC 
-                   LIMIT 100""")
-    fetched_rows = cur.fetchall()
-    return fetched_rows
+                   LIMIT 100""") #
+    fetched_rows = cur.fetchall() #
+    return fetched_rows #
 
-# MAIN
-def lambda_handler(event, context):
-    """
-    Główna funkcja Lambda, która koordynuje cały proces:
-    1. Pobiera dane historyczne kursu EUR/USD z bazy danych.
-    2. Oblicza wskaźniki techniczne (RSI, Z-score, SMA).
-    3. Wykonuje logikę dla każdej strategii handlowej (otwieranie/zamykanie transakcji).
-    4. Pobiera zaktualizowane dane transakcyjne z bazy danych.
-    5. Generuje pliki HTML dashboardów (główny i tylko wykres PnL).
-    6. Zapisuje wygenerowane pliki HTML do bucketu S3.
-    """
-    log_list_main = [] # Lista do zbierania logów dla celów debugowania lub raportowania.
-    logger.info(f"lambda_handler: Rozpoczęto wykonanie funkcji. RequestId: {context.aws_request_id if context else 'N/A'}")
+# ───────── MAIN ─────────
+def lambda_handler(event, context): #
+    log_list_main = [] #
+    logger.info(f"lambda_handler: Rozpoczęto wykonanie funkcji. RequestId: {context.aws_request_id if context else 'N/A'}") #
 
     try:
-        logger.info("lambda_handler: Pobieram początkowe kursy z bazy danych.")
-        # Połączenie z bazą danych i pobranie ostatnich 300 rekordów kursów EUR/USD.
-        with db() as conn, conn.cursor() as cur:
-            cur.execute("SELECT timestamp,rate FROM eurusd_rates ORDER BY timestamp DESC LIMIT 300")
-            rows = cur.fetchall()[::-1] # Odwrócenie kolejności, aby mieć dane od najstarszych do najnowszych.
-        logger.info(f"lambda_handler: Pobranych {len(rows)} wierszy z tabeli eurusd_rates.")
+        logger.info("lambda_handler: Pobieram początkowe kursy z bazy danych.") #
+        with db() as conn, conn.cursor() as cur: #
+            cur.execute("SELECT timestamp,rate FROM eurusd_rates ORDER BY timestamp DESC LIMIT 300") #
+            rows = cur.fetchall()[::-1]  #
+        logger.info(f"lambda_handler: Pobranych {len(rows)} wierszy z tabeli eurusd_rates.") #
 
-        if len(rows) == 0:
-            logger.error("lambda_handler: Brak danych w tabeli eurusd_rates. Przerywam wykonanie.")
-            raise ValueError("Brak danych w tabeli eurusd_rates")
+        if len(rows) == 0: #
+            logger.error("lambda_handler: Brak danych w tabeli eurusd_rates. Przerywam wykonanie.") #
+            raise ValueError("Brak danych w tabeli eurusd_rates") #
 
-        # Przygotowanie danych czasowych i cenowych.
-        times = [r[0].astimezone(timezone.utc) for r in rows]
-        prices = [float(r[1]) for r in rows]
-        t_now, p_now = times[-1], prices[-1] # Aktualny czas i cena (ostatni odczyt).
-        logger.info(f"lambda_handler: Ostatni kurs: Cena={p_now:.5f} o czasie t_now={t_now} (minuta={t_now.minute})")
+        times  = [r[0].astimezone(timezone.utc) for r in rows] #
+        prices = [float(r[1]) for r in rows] #
+        t_now, p_now = times[-1], prices[-1] #
+        logger.info(f"lambda_handler: Ostatni kurs: Cena={p_now:.5f} o czasie t_now={t_now} (minuta={t_now.minute})") #
 
-        # Obliczenie wskaźnika RSI.
-        rsi14 = safe_rsi(prices, RSI_LEN)
-        logger.info(f"lambda_handler: Obliczone RSI14 = {rsi14}")
+        rsi14 = safe_rsi(prices, RSI_LEN) #
+        logger.info(f"lambda_handler: Obliczone RSI14 = {rsi14}") #
 
-        if rsi14 is None:
-            logger.warning("lambda_handler: Za mało świeżych danych do obliczenia RSI – pomijam logikę strategii.")
-            log_list_main.append("Za mało świeżych danych – pomijam logikę strategii")
+        if rsi14 is None: #
+            logger.warning("lambda_handler: Za mało świeżych danych do obliczenia RSI – pomijam logikę strategii.") #
+            log_list_main.append("Za mało świeżych danych – pomijam logikę strategii") #
         else:
-            logger.info("lambda_handler: Rozpoczynam przetwarzanie strategii (RSI14 dostępne).")
-            with db() as conn, conn.cursor() as cur:
-                # 1. Strategia Klasyczna (RSI)
-                handle_strategy(cur,'eurusd_trades',
-                                (rsi14<30, rsi14>70), SL1,TP1, p_now,t_now,EPS,'Klasyczna')
+            logger.info("lambda_handler: Rozpoczynam przetwarzanie strategii (RSI14 dostępne).") #
+            with db() as conn, conn.cursor() as cur:  #
+                handle_strategy(cur,'eurusd_trades', #
+                    (rsi14<30, rsi14>70), SL1,TP1, p_now,t_now,EPS,'Klasyczna') #
 
-                # 2. Strategia Anomalii (Z-score + RSI)
-                if len(prices) >= 51: # Wymaga co najmniej 51 punktów danych do obliczenia log returns.
-                    logger.info("lambda_handler: Wystarczająco danych dla strategii Anomalii.")
-                    # Obliczanie logarytmicznych zwrotów dla ostatnich 50 okresów.
-                    log_returns = [math.log(prices[i]/prices[i-1]) for i in range(len(prices)-50, len(prices))]
-                    if not log_returns:
-                        logger.warning("lambda_handler: Pusta lista log_returns dla strategii Anomalii.")
-                        z = 0.0
-                    else:
-                        ret = math.log(prices[-1]/prices[-2]) if len(prices) >= 2 else 0.0 # Ostatni log return.
-                        mean = statistics.fmean(log_returns) # Średnia log returns.
-                        std = statistics.stdev(log_returns) if len(log_returns) > 1 else 0.0 # Odchylenie standardowe.
-                        z = (ret-mean)/std if std != 0 else 0.0 # Obliczenie z-score.
-                    
-                    logger.info(f"lambda_handler: Strategia Anomalii - z_score={z:.2f}")
-                    handle_strategy(
-                        cur,'eurusd_anom_trades',
-                        (z<=-Z_TH and rsi14<40, z>=Z_TH and rsi14>60), # Warunki otwarcia transakcji.
-                        SL2,TP2,p_now,t_now,EPS,'Anomalia',
-                        extra_cols=('z_score',round(z,2)) # Dodatkowa kolumna dla z-score.
-                    )
+                if len(prices) >= 51: #
+                    logger.info("lambda_handler: Wystarczająco danych dla strategii Anomalii.") #
+                    log_returns = [math.log(prices[i]/prices[i-1]) for i in range(len(prices)-50, len(prices))] #
+                    if not log_returns:  #
+                        logger.warning("lambda_handler: Pusta lista log_returns dla strategii Anomalii.") #
+                        z = 0.0 #
+                    else: #
+                        ret  = math.log(prices[-1]/prices[-2]) if len(prices) >= 2 else 0.0 #
+                        mean = statistics.fmean(log_returns) #
+                        std  = statistics.stdev(log_returns) if len(log_returns) > 1 else 0.0 #
+                        z    = (ret-mean)/std if std != 0 else 0.0 #
+                    logger.info(f"lambda_handler: Strategia Anomalii - z_score={z:.2f}") #
+                    handle_strategy( #
+                        cur,'eurusd_anom_trades', #
+                        (z<=-Z_TH and rsi14<40, z>=Z_TH and rsi14>60), #
+                        SL2,TP2,p_now,t_now,EPS,'Anomalia', #
+                        extra_cols=('z_score',round(z,2)) #
+                    ) #
                 else:
-                    logger.warning("lambda_handler: Za mało danych dla strategii Anomalii (potrzebne >=51).")
+                    logger.warning("lambda_handler: Za mało danych dla strategii Anomalii (potrzebne >=51).") #
 
-                # 3. Strategia Fraktal + SMA
-                if len(prices) >= SMA_LEN and len(prices) >= 5: # Wymaga wystarczającej liczby danych dla SMA i fraktali.
-                    logger.info("lambda_handler: Wystarczająco danych dla strategii Fraktal+SMA.")
-                    sma50 = statistics.fmean(prices[-SMA_LEN:]) # Obliczenie SMA.
-                    # Wykrywanie fraktali (high/low).
-                    is_high = prices[-3] == max(prices[-5:]) and prices[-3] > prices[-4] and prices[-3] > prices[-2]
-                    is_low = prices[-3] == min(prices[-5:]) and prices[-3] < prices[-4] and prices[-3] < prices[-2]
+                if len(prices) >= SMA_LEN and len(prices) >= 5: #
+                    logger.info("lambda_handler: Wystarczająco danych dla strategii Fraktal+SMA.") #
+                    sma50 = statistics.fmean(prices[-SMA_LEN:]) #
+                    is_high = prices[-3] == max(prices[-5:]) and prices[-3] > prices[-4] and prices[-3] > prices[-2] #
+                    is_low  = prices[-3] == min(prices[-5:]) and prices[-3] < prices[-4] and prices[-3] < prices[-2] #
 
-                    logger.info(f"lambda_handler: Strategia Fraktal+SMA - SMA50={sma50:.5f}, is_high={is_high}, is_low={is_low}")
-                    handle_strategy(
-                        cur,'eurusd_frac_trades',
-                        (is_low and p_now>sma50, is_high and p_now<sma50), # Warunki otwarcia.
-                        SL3,TP3,p_now,t_now,EPS,'Fraktal+SMA'
+                    logger.info(f"lambda_handler: Strategia Fraktal+SMA - SMA50={sma50:.5f}, is_high={is_high}, is_low={is_low}") #
+                    handle_strategy( #
+                        cur,'eurusd_frac_trades', #
+                        (is_low and p_now>sma50, is_high and p_now<sma50), #
+                        SL3,TP3,p_now,t_now,EPS,'Fraktal+SMA' #
                     )
-                else:
-                    logger.warning(f"lambda_handler: Za mało danych dla strategii Fraktal+SMA (potrzebne >= {max(SMA_LEN, 5)}).")
-            logger.info("lambda_handler: Zakończono przetwarzanie strategii.")
+                else: #
+                    logger.warning(f"lambda_handler: Za mało danych dla strategii Fraktal+SMA (potrzebne >= {max(SMA_LEN, 5)}).") #
+            logger.info("lambda_handler: Zakończono przetwarzanie strategii.") #
 
-        logger.info("lambda_handler: Pobieram dane do raportu HTML PO przetworzeniu strategii.")
-        # Pobranie najnowszych danych transakcyjnych dla każdej strategii w celu wygenerowania raportów.
-        with db() as conn, conn.cursor() as cur:
-            s1_trades = fetch(cur,'eurusd_trades')
-            s2_trades = fetch(cur,'eurusd_anom_trades')
-            s3_trades = fetch(cur,'eurusd_frac_trades')
-        logger.info(f"lambda_handler: Dane do tabel: s1={len(s1_trades)} wierszy, s2={len(s2_trades)} wierszy, s3={len(s3_trades)} wierszy.")
+        logger.info("lambda_handler: Pobieram dane do raportu HTML PO przetworzeniu strategii.") #
+        with db() as conn, conn.cursor() as cur: #
+            s1_trades = fetch(cur,'eurusd_trades') #
+            s2_trades = fetch(cur,'eurusd_anom_trades') #
+            s3_trades = fetch(cur,'eurusd_frac_trades') #
+        logger.info(f"lambda_handler: Dane do tabel: s1={len(s1_trades)} wierszy, s2={len(s2_trades)} wierszy, s3={len(s3_trades)} wierszy.") #
 
-        # Przygotowanie danych do wykresów PnL.
+        # Przygotowanie danych do wykresów
         pnl_prepared_data = prepare_pnl_chart_data(s1_trades, s2_trades, s3_trades, logger)
 
-        # Etykiety i wartości dla wykresu kursu (ostatnie 15).
-        rate_chart_labels = [t.strftime('%H:%M') for t in times[-15:]]
-        rate_chart_values = prices[-15:]
+        rate_chart_labels = [t.strftime('%H:%M') for t in times[-15:]] #
+        rate_chart_values = prices[-15:] #
 
-        logger.info("lambda_handler: Generuję HTML dla głównego dashboardu EUR/USD.")
-        # Generowanie pełnego HTML dla głównego dashboardu.
+        logger.info("lambda_handler: Generuję HTML dla głównego dashboardu EUR/USD.") #
         html_content_main_dashboard = render_main_eurusd_dashboard_html(
             rate_chart_labels, rate_chart_values,
             s1_trades, s2_trades, s3_trades,
             pnl_prepared_data, logger
         )
-        logger.info(f"lambda_handler: Wygenerowano HTML dla głównego dashboardu EUR/USD (długość: {len(html_content_main_dashboard)} znaków).")
+        logger.info(f"lambda_handler: Wygenerowano HTML dla głównego dashboardu EUR/USD (długość: {len(html_content_main_dashboard)} znaków).") #
 
-        # Zapis głównego dashboardu EUR/USD do S3.
-        try:
+        # Zapis głównego dashboardu EUR/USD do S3
+        try: #
             s3_client.put_object(
                 Bucket=BUCKET_TARGET, 
                 Key=KEY_EURUSD_MAIN_DASHBOARD_HTML,
                 Body=html_content_main_dashboard.encode("utf-8"),
                 ContentType="text/html; charset=utf-8",
-                CacheControl="no-cache" # Zapobiega cachowaniu pliku przez przeglądarkę.
+                CacheControl="no-cache" #
             )
             logger.info(f"📈 Główny dashboard EUR/USD zaktualizowany → s3://{BUCKET_TARGET}/{KEY_EURUSD_MAIN_DASHBOARD_HTML}")
         except Exception as e:
             logger.error(f"lambda_handler: Nie udało się zapisać głównego dashboardu EUR/USD do S3: {str(e)}", exc_info=True)
 
 
-        # Generowanie HTML tylko dla wykresu PnL EUR/USD (do osadzenia).
-        logger.info("lambda_handler: Generuję HTML dla wykresu PnL EUR/USD (tylko wykres).")
+        # Generowanie HTML tylko dla wykresu PnL EUR/USD
+        logger.info("lambda_handler: Generuję HTML dla wykresu PnL EUR/USD (tylko wykres).") #
         pnl_chart_only_html_eurusd = render_eurusd_pnl_chart_only_html(pnl_prepared_data)
         logger.info(f"lambda_handler: Wygenerowano HTML dla wykresu PnL EUR/USD (długość: {len(pnl_chart_only_html_eurusd)} znaków).")
 
-        # Zapis samego wykresu PnL EUR/USD do S3.
+        # Zapis samego wykresu PnL EUR/USD do S3
         try:
             s3_client.put_object(
                 Bucket=BUCKET_TARGET, 
-                Key=KEY_EURUSD_PNL_CHART_ONLY_HTML,
+                Key=KEY_EURUSD_PNL_CHART_ONLY_HTML, #
                 Body=pnl_chart_only_html_eurusd.encode("utf-8"),
-                ContentType="text/html; charset=utf-8",
+                ContentType="text/html; charset=utf-8", #
                 CacheControl="no-cache"
             )
             logger.info(f"📈 EUR/USD PnL chart only HTML updated → s3://{BUCKET_TARGET}/{KEY_EURUSD_PNL_CHART_ONLY_HTML}")
         except Exception as e:
             logger.error(f"lambda_handler: Nie udało się zapisać wykresu PnL EUR/USD (tylko wykres) do S3: {str(e)}", exc_info=True)
-            # Jeśli ten zapis jest krytyczny, można tu rzucić błąd lub odpowiednio zareagować.
+            # Jeśli ten zapis jest krytyczny, można tu rzucić błąd lub odpowiednio zareagować #
 
-        logger.info(f"lambda_handler: Końcowa zawartość listy log_list_main: {log_list_main}")
-        logger.info("lambda_handler: Funkcja zakończona pomyślnie.")
+        logger.info(f"lambda_handler: Końcowa zawartość listy log_list_main: {log_list_main}") #
+        logger.info("lambda_handler: Funkcja zakończona pomyślnie.") #
         return {
             "statusCode":200,
-            "headers":{"Content-Type":"text/html; charset=utf-8"},
-            "body":html_content_main_dashboard # Zwraca główny dashboard jako ciało odpowiedzi Lambda.
+            "headers":{"Content-Type":"text/html; charset=utf-8"}, #
+            "body":html_content_main_dashboard #
         } 
 
-    except Exception as e:
-        # Obsługa błędów na najwyższym poziomie funkcji Lambda.
-        logger.error(f"lambda_handler: KRYTYCZNY BŁĄD w głównej obsłudze: {str(e)}", exc_info=True)
-        log_list_main.append(f"ERROR main: {str(e)} - traceback: {traceback.format_exc()}")
-        logger.info(f"lambda_handler: Końcowa zawartość listy log_list_main przy błędzie: {log_list_main}")
+    except Exception as e: #
+        logger.error(f"lambda_handler: KRYTYCZNY BŁĄD w głównej obsłudze: {str(e)}", exc_info=True) #
+        log_list_main.append(f"ERROR main: {str(e)} - traceback: {traceback.format_exc()}") #
+        logger.info(f"lambda_handler: Końcowa zawartość listy log_list_main przy błędzie: {log_list_main}") #
         
-        return {"statusCode":500,"body":json.dumps({"error":str(e),"log":log_list_main})}
+        return {"statusCode":500,"body":json.dumps({"error":str(e),"log":log_list_main})} #
