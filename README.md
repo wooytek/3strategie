@@ -11,7 +11,7 @@ Diagramy:
     p_eurusd.png                                                                                                                                               
     p_usdjpy.png                                                                                    
 
-Kody:
+Kody:                                                                                                                                                                                                                
    P_USDJPY=================                                                                                                                                                                                                                                   
        fetch-usdjpy-lambda.py                                                                                                                                                                                                                                                  
        save-usdjpy-lambda.py                                                                                                                                                                                                                                                  
