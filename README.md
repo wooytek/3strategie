@@ -12,19 +12,19 @@ Diagramy:
     p_usdjpy.png                                                                                    
 
 Kody:
-   P_USDJPY=================
-       fetch-usdjpy-lambda.py
-       save-usdjpy-lambda.py         
-       analyze-usdjpy-lambda.py      
-       dashboard-usdjpy-lambda.py    
+   P_USDJPY=================                                                                                                                                                                                                                                   
+       fetch-usdjpy-lambda.py                                                                                                                                                                                                                                                  
+       save-usdjpy-lambda.py                                                                                                                                                                                                                                                  
+       analyze-usdjpy-lambda.py                                                                                                                                                                                                                                                
+       dashboard-usdjpy-lambda.py                                                                                                                                                                                                                                              
        index_usdjpy.html             
-   P_EURUSD=================
-       usdjpy_pnl_chart_only.html 
-       fetch_eurusd_lambda.py
-       eurusd-analyzer.py              
-       eurusd_pnl_chart_only.html
-   3strategie=================
-       summary_dashboard.html   
+   P_EURUSD=================                                                                                                                                                                                                                                   
+       usdjpy_pnl_chart_only.html                                                                                                                                                                                                                                    
+       fetch_eurusd_lambda.py                                                                                                                                                                                                                                   
+       eurusd-analyzer.py                                                                                                                                                                                                                                                 
+       eurusd_pnl_chart_only.html                                                                                                                                                                                                                                   
+   3strategie=================                                                                                                                                                                                                                                   
+       summary_dashboard.html                                                                                                                                                                                                                                      
 
 
 
